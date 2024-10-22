@@ -207,6 +207,15 @@ export default {
      * @return {Promise<void>}
      */
     async email(message, env, ctx) {
+        const fromHeader = this.message.headers.get('from') || '';
+
+        // Extract the sender's email from the 'From' header
+        const emailMatch = fromHeader.match(/<([^>]+)>/);
+        const senderEmail = emailMatch ? emailMatch[1] : fromHeader;
+        const senderEmailLower = senderEmail.toLowerCase();
+
+        console.log(`Processing message from: ${senderEmailLower}`)
+
         // Define the array of email filters
         const emailFilters = [SpamFilter /* , AdditionalFilters */];
 
@@ -301,7 +310,7 @@ export default {
 
             if (responseSuccess && responseSuccess.length === 2 && parseInt(responseSuccess[1], 10) > 0) {
                 console.log(`Successfully processed. Record ${parseInt(responseSuccess[1], 10)}`);
-                console.log(JSON.stringify({ url, xml, data }, null, 2));
+                // console.log(JSON.stringify({ url, xml, data }, null, 2));
             } else if (faultMatch && faultMatch.length === 2) {
                 const faultString = faultMatch[1];
                 console.error(`Fault response from API: ${faultString}`);
