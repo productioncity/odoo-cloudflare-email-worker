@@ -9,14 +9,15 @@
  * Code History:
  * - Created on 2024-10-21 by Troy Kelly
  * - Updated SpamFilter to include sender name analysis for Gmail addresses.
+ * - Modified on 2024-10-22 to fix response handling and add error capturing.
  */
 
 /**
-* Asynchronously converts a stream to an ArrayBuffer.
-* @param {ReadableStream} stream - The stream to convert.
-* @param {number} streamSize - The expected size of the stream.
-* @return {Promise<Uint8Array>} The resulting ArrayBuffer.
-*/
+ * Asynchronously converts a stream to an ArrayBuffer.
+ * @param {ReadableStream} stream - The stream to convert.
+ * @param {number} streamSize - The expected size of the stream.
+ * @return {Promise<Uint8Array>} The resulting ArrayBuffer.
+ */
 async function streamToArrayBuffer(stream, streamSize) {
     let result = new Uint8Array(streamSize);
     let bytesRead = 0;
@@ -48,22 +49,22 @@ function base64ArrayBuffer(arrayBuffer) {
     for (let i = 0; i < mainLength; i += 3) {
         const chunk = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
         const a = (chunk & 16515072) >> 18; // 16515072 = (2^6 - 1) << 18
-        const b = (chunk & 258048) >> 12;  // 258048   = (2^6 - 1) << 12
-        const c = (chunk & 4032) >> 6;     // 4032     = (2^6 - 1) << 6
-        const d = chunk & 63;              // 63       = 2^6 - 1
+        const b = (chunk & 258048) >> 12;   // 258048   = (2^6 - 1) << 12
+        const c = (chunk & 4032) >> 6;      // 4032     = (2^6 - 1) << 6
+        const d = chunk & 63;               // 63       = 2^6 - 1
         base64 += encodings[a] + encodings[b] + encodings[c] + encodings[d];
     }
 
     if (byteRemainder === 1) {
         const chunk = bytes[mainLength];
-        const a = (chunk & 252) >> 2;   // 252 = (2^6 - 1) << 2
-        const b = (chunk & 3) << 4;     // 3   = 2^2 - 1
+        const a = (chunk & 252) >> 2;       // 252 = (2^6 - 1) << 2
+        const b = (chunk & 3) << 4;         // 3   = 2^2 - 1
         base64 += encodings[a] + encodings[b] + '==';
     } else if (byteRemainder === 2) {
         const chunk = (bytes[mainLength] << 8) | bytes[mainLength + 1];
-        const a = (chunk & 64512) >> 10; // 64512 = (2^6 - 1) << 10
-        const b = (chunk & 1008) >> 4;   // 1008  = (2^6 - 1) << 4
-        const c = (chunk & 15) << 2;     // 15    = 2^4 - 1
+        const a = (chunk & 64512) >> 10;    // 64512 = (2^6 - 1) << 10
+        const b = (chunk & 1008) >> 4;      // 1008  = (2^6 - 1) << 4
+        const c = (chunk & 15) << 2;        // 15    = 2^4 - 1
         base64 += encodings[a] + encodings[b] + encodings[c] + '=';
     }
 
@@ -215,7 +216,7 @@ export default {
             const result = filter.check();
 
             if (!result.ingest) {
-                console.warn(`Email rejected by ${FilterClass.name}: ${result.reason}`);
+                console.warn(`Email rejected by ${FilterClass.name}: ${result.reason} `);
                 message.setReject(result.reason || 'Message rejected by filter.');
                 return;
             }
@@ -285,23 +286,36 @@ export default {
             const data = await response.text();
 
             if (!response.ok) {
+                console.error(`HTTP Error: ${response.status} ${response.statusText}`);
                 message.setReject(`Unable to deliver to CRM. ${response.status} ${response.statusText}`);
-            } else {
-                // Parse and validate the response
-                const regexpSuccess = /<methodResponse>[\s\S]*<int>(\d+)<\/int>[\s\S]*<\/methodResponse>/im;
-                const responseSuccess = regexpSuccess.exec(data);
+                return;
+            }
 
-                if (responseSuccess && responseSuccess.length === 2 && parseInt(responseSuccess[1], 10) > 0) {
-                    console.log(`Successfully processed. Record ${parseInt(responseSuccess[1], 10)}`);
-                    console.log(JSON.stringify({ url, xml, data }, null, 2));
-                } else {
-                    console.error(`Invalid response from API: ${data}`);
-                    message.setReject('Invalid recipient');
-                }
+            // Adjusted regex to only match <int> within <params>
+            const regexpSuccess = /<methodResponse>\s*<params>[\s\S]*?<int>(\d+)<\/int>[\s\S]*?<\/params>\s*<\/methodResponse>/im;
+            const responseSuccess = regexpSuccess.exec(data);
+
+            // New regex to detect faults
+            const faultRegex = /<fault>[\s\S]*?<value>[\s\S]*?<struct>[\s\S]*?<member>[\s\S]*?<name>faultString<\/name>[\s\S]*?<value>[\s\S]*?<string>(.*?)<\/string>[\s\S]*?<\/value>[\s\S]*?<\/member>[\s\S]*?<\/struct>[\s\S]*?<\/value>[\s\S]*?<\/fault>/im;
+            const faultMatch = faultRegex.exec(data);
+
+            if (responseSuccess && responseSuccess.length === 2 && parseInt(responseSuccess[1], 10) > 0) {
+                console.log(`Successfully processed. Record ${parseInt(responseSuccess[1], 10)}`);
+                console.log(JSON.stringify({ url, xml, data }, null, 2));
+            } else if (faultMatch && faultMatch.length === 2) {
+                const faultString = faultMatch[1];
+                console.error(`Fault response from API: ${faultString}`);
+                message.setReject(`Unable to deliver to CRM: ${faultString}`);
+                return;
+            } else {
+                console.error(`Invalid response from API: ${data}`);
+                message.setReject('Invalid recipient or unexpected CRM response.');
+                return;
             }
         } catch (error) {
-            console.error(error);
-            message.setReject('Unable to deliver to CRM. Unable to package.');
+            console.error('Error during CRM communication:', error);
+            message.setReject('Unable to deliver to CRM due to a communication error.');
+            return;
         }
     },
 };
