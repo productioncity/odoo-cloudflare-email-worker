@@ -207,14 +207,18 @@ export default {
      * @return {Promise<void>}
      */
     async email(message, env, ctx) {
-        const fromHeader = this.message.headers.get('from') || '';
+        try {
+            const fromHeader = message.headers.get('from') || '';
 
-        // Extract the sender's email from the 'From' header
-        const emailMatch = fromHeader.match(/<([^>]+)>/);
-        const senderEmail = emailMatch ? emailMatch[1] : fromHeader;
-        const senderEmailLower = senderEmail.toLowerCase();
+            // Extract the sender's email from the 'From' header
+            const emailMatch = fromHeader.match(/<([^>]+)>/);
+            const senderEmail = emailMatch ? emailMatch[1] : fromHeader;
+            const senderEmailLower = senderEmail.toLowerCase();
 
-        console.log(`Processing message from: ${senderEmailLower}`)
+            console.log(`Processing message from: ${senderEmailLower}`)
+        } catch (error) {
+            console.error(error);
+        }
 
         // Define the array of email filters
         const emailFilters = [SpamFilter /* , AdditionalFilters */];
