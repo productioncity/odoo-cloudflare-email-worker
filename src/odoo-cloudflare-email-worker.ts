@@ -1,15 +1,3 @@
-# llm.md
-
-Please provide your instructions under the "Prompt" section below.
-
-## Prompt
-
-Please review the cloudflare email worker in src. Ensure it follows our coding conventions and makes full use of any cloudflare worker functionality for logging, error capture etc.
-We should ensure the script is as robust as possible - given it is not interactive with a user, and exposed to third parties via email. We need to ensure it can't become an attack vector.
-## Assistant's Response
-
-<<LLM_FILE_START: src/odoo-cloudflare-email-worker.ts>>
-```typescript
 /**
  * Email Processor Module
  *
@@ -334,5 +322,3 @@ export default {
     }
   },
 };
-```
-<<LLM_FILE_END>>
