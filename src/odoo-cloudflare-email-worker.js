@@ -255,10 +255,10 @@ class CrmServerHandler {
             const data = await response.text();
 
             // Handle the response.
-            this.#validateResponse(response, data);
+            await this.#validateResponse(response, data);
         } catch (error) {
             console.error('Error during CRM communication:', error);
-            throw new Error('Unable to communicate with CRM server.');
+            throw new Error(`Unable to communicate with CRM server: ${error.message}`);
         }
     }
 
@@ -266,10 +266,11 @@ class CrmServerHandler {
      * Validates the CRM server response.
      * @param {Response} response The fetch response object.
      * @param {string} data The response body as text.
+     * @return {Promise<void>}
      * @throws {Error} If the validation fails.
      * @private
      */
-    #validateResponse(response, data) {
+    async #validateResponse(response, data) {
         if (!response.ok) {
             console.error(`HTTP Error: ${response.status} ${response.statusText}`);
             throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
@@ -297,8 +298,8 @@ class CrmServerHandler {
         const valueElement = xmlDoc.querySelector('methodResponse > params > param > value');
 
         if (valueElement) {
-            const booleanElement = valueElement.querySelector('boolean');
             const intElement = valueElement.querySelector('int');
+            const booleanElement = valueElement.querySelector('boolean');
 
             if (intElement) {
                 const recordId = parseInt(intElement.textContent, 10);
@@ -311,7 +312,15 @@ class CrmServerHandler {
             } else if (booleanElement) {
                 const booleanValue = booleanElement.textContent;
                 console.log(`CRM response received. Boolean value: ${booleanValue}`);
-                // Additional handling for boolean responses if necessary.
+
+                if (booleanValue === '0') {
+                    // Email was rejected by CRM.
+                    const rejectionReason = await this.#extractRejectionReason(xmlDoc);
+                    console.error(`Email was rejected by CRM: ${rejectionReason}`);
+                    throw new Error(`Email rejected by CRM: ${rejectionReason}`);
+                } else {
+                    console.log('Email accepted by CRM with boolean true.');
+                }
             } else {
                 console.warn('Unexpected response format from CRM.');
                 throw new Error('Unexpected response format from CRM.');
@@ -320,6 +329,22 @@ class CrmServerHandler {
             console.warn('No value element found in CRM response.');
             throw new Error('Invalid response from CRM server.');
         }
+    }
+
+    /**
+     * Extracts the rejection reason from the CRM response.
+     * @param {Document} xmlDoc The XML document of the response.
+     * @return {Promise<string>} The rejection reason.
+     * @private
+     */
+    async #extractRejectionReason(xmlDoc) {
+        // Attempt to extract any additional information from the response.
+        const faultStringElement = xmlDoc.querySelector('string');
+        if (faultStringElement) {
+            return faultStringElement.textContent || 'Unknown reason';
+        }
+        // If no specific reason is provided.
+        return 'No specific reason provided by CRM.';
     }
 }
 
@@ -389,10 +414,9 @@ export default {
 
         try {
             await crm.sendEmail(rawEmail);
-        }
-        catch (error) {
+        } catch (error) {
             console.error(error);
-            message.setReject('Unable to deliver to CRM.');
+            message.setReject(`Unable to deliver to CRM. Reason: ${error.message}`);
         }
     },
 };
