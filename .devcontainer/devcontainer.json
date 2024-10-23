@@ -41,7 +41,19 @@
 		"--env-file",
 		".env"
 	],
-	"postCreateCommand": "git config --global --add safe.directory /workspaces/odoo-cloudflare-email-worker && sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y full-upgrade && python3 -m venv ~/venv && . ~/venv/bin/activate && pip install --upgrade pip && pip install tqdm openai pyyaml && grep -qxF 'source ~/venv/bin/activate' ~/.zshrc || echo 'source ~/venv/bin/activate' >> ~/.zshrc"
+	"postCreateCommand": "git config --global --add safe.directory /workspaces/odoo-cloudflare-email-worker && sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get -y full-upgrade && python3 -m venv ~/venv && . ~/venv/bin/activate && pip install --upgrade pip && pip install tqdm openai pyyaml && grep -qxF 'source ~/venv/bin/activate' ~/.zshrc || echo 'source ~/venv/bin/activate' >> ~/.zshrc",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-vscode.vscode-typescript-next",
+				"GitHub.copilot",
+				"GitHub.vscode-pull-request-github",
+				"GitHub.github-vscode-theme",
+				"GitHub.copilot-chat",
+				"GitHub.remotehub"
+			]
+		}
+	}
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.

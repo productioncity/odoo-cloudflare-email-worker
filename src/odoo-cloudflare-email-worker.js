@@ -196,6 +196,134 @@ class SpamFilter extends EmailFilter {
 }
 
 /**
+ * Class to handle interactions with the CRM server.
+ */
+class CrmServerHandler {
+    /**
+     * Creates an instance of CrmServerHandler.
+     * @param {Object<string, string>} options CRM connection options.
+     */
+    constructor(options) {
+        this.options = options;
+    }
+
+    /**
+     * Sends the email data to the CRM server.
+     * @param {Uint8Array} rawEmail The raw email data.
+     * @return {Promise<void>}
+     */
+    async sendEmail(rawEmail) {
+        const url = `${this.options.protocol}://${this.options.host}:${this.options.port}/xmlrpc/2/object`;
+
+        // Construct the XML payload ensuring no leading whitespace.
+        const xml = `<?xml version="1.0"?>
+<methodCall>
+<methodName>execute_kw</methodName>
+<params>
+<param><value><string>${this.options.database}</string></value></param>
+<param><value><int>${this.options.userid}</int></value></param>
+<param><value><string>${this.options.password}</string></value></param>
+<param><value><string>mail.thread</string></value></param>
+<param><value><string>message_process</string></value></param>
+<param>
+<value>
+<array>
+<data>
+<value><boolean>0</boolean></value>
+<value><base64>${base64ArrayBuffer(rawEmail)}</base64></value>
+</data>
+</array>
+</value>
+</param>
+<param><value><struct></struct></value></param>
+</params>
+</methodCall>`;
+
+        const headers = {
+            'Content-Type': 'application/xml',
+        };
+
+        const fetchOptions = {
+            method: 'POST',
+            headers: headers,
+            body: xml,
+        };
+
+        // Make the request to the CRM.
+        try {
+            const response = await fetch(url, fetchOptions);
+            const data = await response.text();
+
+            // Handle the response.
+            this.#validateResponse(response, data);
+        } catch (error) {
+            console.error('Error during CRM communication:', error);
+            throw new Error('Unable to communicate with CRM server.');
+        }
+    }
+
+    /**
+     * Validates the CRM server response.
+     * @param {Response} response The fetch response object.
+     * @param {string} data The response body as text.
+     * @throws {Error} If the validation fails.
+     * @private
+     */
+    #validateResponse(response, data) {
+        if (!response.ok) {
+            console.error(`HTTP Error: ${response.status} ${response.statusText}`);
+            throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
+        }
+
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(data, 'application/xml');
+
+        // Check for parse errors.
+        if (xmlDoc.querySelector('parsererror')) {
+            console.error('Failed to parse XML response from CRM.');
+            throw new Error('Invalid response from CRM server.');
+        }
+
+        // Check for <fault>.
+        const faultElement = xmlDoc.querySelector('fault');
+        if (faultElement) {
+            const faultStringElement = faultElement.querySelector('string');
+            const faultString = faultStringElement ? faultStringElement.textContent : 'Unknown fault';
+            console.error(`Fault response from API: ${faultString}`);
+            throw new Error(`CRM Error: ${faultString}`);
+        }
+
+        // Process success response.
+        const valueElement = xmlDoc.querySelector('methodResponse > params > param > value');
+
+        if (valueElement) {
+            const booleanElement = valueElement.querySelector('boolean');
+            const intElement = valueElement.querySelector('int');
+
+            if (intElement) {
+                const recordId = parseInt(intElement.textContent, 10);
+                if (recordId > 0) {
+                    console.log(`Successfully processed. Record ID: ${recordId}`);
+                } else {
+                    console.warn('Received non-positive record ID from CRM.');
+                    throw new Error('Invalid record ID received from CRM.');
+                }
+            } else if (booleanElement) {
+                const booleanValue = booleanElement.textContent;
+                console.log(`CRM response received. Boolean value: ${booleanValue}`);
+                // Additional handling for boolean responses if necessary.
+            } else {
+                console.warn('Unexpected response format from CRM.');
+                throw new Error('Unexpected response format from CRM.');
+            }
+        } else {
+            console.warn('No value element found in CRM response.');
+            throw new Error('Invalid response from CRM server.');
+        }
+    }
+}
+
+/**
  * Default export object containing the email processing function.
  */
 export default {
@@ -257,78 +385,14 @@ export default {
             protocol: env.ODOO_PROTOCOL || 'https',
         };
 
-        const url = `${options.protocol}://${options.host}:${options.port}/xmlrpc/2/object`;
+        const crm = new CrmServerHandler(options)
 
-        // Construct the XML payload ensuring no leading whitespace
-        const xml = `<?xml version="1.0"?>
-<methodCall>
-<methodName>execute_kw</methodName>
-<params>
-<param><value><string>${options.database}</string></value></param>
-<param><value><int>${options.userid}</int></value></param>
-<param><value><string>${options.password}</string></value></param>
-<param><value><string>mail.thread</string></value></param>
-<param><value><string>message_process</string></value></param>
-<param>
-<value>
-<array>
-<data>
-<value><boolean>0</boolean></value>
-<value><base64>${base64ArrayBuffer(rawEmail)}</base64></value>
-</data>
-</array>
-</value>
-</param>
-<param><value><struct></struct></value></param>
-</params>
-</methodCall>`;
-
-        const headers = {
-            'Content-Type': 'application/xml',
-        };
-
-        const fetchOptions = {
-            method: 'POST',
-            headers: headers,
-            body: xml,
-        };
-
-        // Make the request to the CRM
         try {
-            const response = await fetch(url, fetchOptions);
-            const data = await response.text();
-
-            if (!response.ok) {
-                console.error(`HTTP Error: ${response.status} ${response.statusText}`);
-                message.setReject(`Unable to deliver to CRM. ${response.status} ${response.statusText}`);
-                return;
-            }
-
-            // Adjusted regex to only match <int> within <params>
-            const regexpSuccess = /<methodResponse>\s*<params>[\s\S]*?<int>(\d+)<\/int>[\s\S]*?<\/params>\s*<\/methodResponse>/im;
-            const responseSuccess = regexpSuccess.exec(data);
-
-            // New regex to detect faults
-            const faultRegex = /<fault>[\s\S]*?<value>[\s\S]*?<struct>[\s\S]*?<member>[\s\S]*?<name>faultString<\/name>[\s\S]*?<value>[\s\S]*?<string>(.*?)<\/string>[\s\S]*?<\/value>[\s\S]*?<\/member>[\s\S]*?<\/struct>[\s\S]*?<\/value>[\s\S]*?<\/fault>/im;
-            const faultMatch = faultRegex.exec(data);
-
-            if (responseSuccess && responseSuccess.length === 2 && parseInt(responseSuccess[1], 10) > 0) {
-                console.log(`Successfully processed. Record ${parseInt(responseSuccess[1], 10)}`);
-                // console.log(JSON.stringify({ url, xml, data }, null, 2));
-            } else if (faultMatch && faultMatch.length === 2) {
-                const faultString = faultMatch[1];
-                console.error(`Fault response from API: ${faultString}`);
-                message.setReject(`Unable to deliver to CRM: ${faultString}`);
-                return;
-            } else {
-                console.error(`Invalid response from API: ${data}`);
-                message.setReject('Invalid recipient or unexpected CRM response.');
-                return;
-            }
-        } catch (error) {
-            console.error('Error during CRM communication:', error);
-            message.setReject('Unable to deliver to CRM due to a communication error.');
-            return;
+            await crm.sendEmail(rawEmail);
+        }
+        catch (error) {
+            console.error(error);
+            message.setReject('Unable to deliver to CRM.');
         }
     },
 };
