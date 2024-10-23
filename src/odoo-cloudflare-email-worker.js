@@ -4,7 +4,7 @@
  * Processes incoming email messages and sends them to Odoo CRM after filtering them for spam and other criteria.
  *
  * Author: Troy Kelly
- * Contact: troy@aperim.cmo
+ * Contact: troy@aperim.com
  *
  * Code History:
  * - Created on 2024-10-21 by Troy Kelly
