@@ -276,58 +276,41 @@ class CrmServerHandler {
             throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
         }
 
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(data, 'application/xml');
-
-        // Check for parse errors.
-        if (xmlDoc.querySelector('parsererror')) {
-            console.error('Failed to parse XML response from CRM.');
-            throw new Error('Invalid response from CRM server.');
-        }
-
-        // Check for <fault>.
-        const faultElement = xmlDoc.querySelector('fault');
-        if (faultElement) {
-            const faultStringElement = faultElement.querySelector('string');
-            const faultString = faultStringElement ? faultStringElement.textContent : 'Unknown fault';
+        // Check if the response contains a fault.
+        if (data.includes('<fault>')) {
+            // Extract the fault string.
+            const faultStringMatch = data.match(/<faultString>\s*(.*?)\s*<\/faultString>/i);
+            const faultString = faultStringMatch ? faultStringMatch[1].trim() : 'Unknown fault';
             console.error(`Fault response from API: ${faultString}`);
             throw new Error(`CRM Error: ${faultString}`);
         }
 
-        // Process success response.
-        const valueElement = xmlDoc.querySelector('methodResponse > params > param > value');
+        // Check for boolean or int value.
+        const intMatch = data.match(/<int>\s*(\d+)\s*<\/int>/i);
+        const booleanMatch = data.match(/<boolean>\s*(\d)\s*<\/boolean>/i);
 
-        if (valueElement) {
-            const intElement = valueElement.querySelector('int');
-            const booleanElement = valueElement.querySelector('boolean');
-
-            if (intElement) {
-                const recordId = parseInt(intElement.textContent, 10);
-                if (recordId > 0) {
-                    console.log(`Successfully processed. Record ID: ${recordId}`);
-                } else {
-                    console.warn('Received non-positive record ID from CRM.');
-                    throw new Error('Invalid record ID received from CRM.');
-                }
-            } else if (booleanElement) {
-                const booleanValue = booleanElement.textContent;
-                console.log(`CRM response received. Boolean value: ${booleanValue}`);
-
-                if (booleanValue === '0') {
-                    // Email was rejected by CRM.
-                    const rejectionReason = await this.#extractRejectionReason(xmlDoc);
-                    console.error(`Email was rejected by CRM: ${rejectionReason}`);
-                    throw new Error(`Email rejected by CRM: ${rejectionReason}`);
-                } else {
-                    console.log('Email accepted by CRM with boolean true.');
-                }
+        if (intMatch) {
+            const recordId = parseInt(intMatch[1], 10);
+            if (recordId > 0) {
+                console.log(`Successfully processed. Record ID: ${recordId}`);
             } else {
-                console.warn('Unexpected response format from CRM.');
-                throw new Error('Unexpected response format from CRM.');
+                console.warn('Received non-positive record ID from CRM.');
+                throw new Error('Invalid record ID received from CRM.');
+            }
+        } else if (booleanMatch) {
+            const booleanValue = booleanMatch[1];
+            console.log(`CRM response received. Boolean value: ${booleanValue}`);
+
+            if (booleanValue === '0') {
+                // Email was rejected by CRM.
+                console.error('Email was rejected by CRM with boolean value 0.');
+                throw new Error('Email rejected by CRM.');
+            } else {
+                console.log('Email accepted by CRM with boolean true.');
             }
         } else {
-            console.warn('No value element found in CRM response.');
-            throw new Error('Invalid response from CRM server.');
+            console.warn('Unexpected response format from CRM.');
+            throw new Error('Unexpected response format from CRM.');
         }
     }
 
